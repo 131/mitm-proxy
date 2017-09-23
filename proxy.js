@@ -6,7 +6,6 @@ const https = require('https');
 const util = require('util');
 const url = require('url');
 
-const defer = require('nyks/promise/defer');
 const EventsAsync = require('eventemitter-async');
 const sprintf = util.format;
 const trace   = require('debug')('mitm');
@@ -143,6 +142,7 @@ class Proxy extends EventsAsync {
 
 
   _onError(kind, ctx, err) {
+
     this.onErrorHandlers.forEach( fn => fn(ctx, err, kind));
 
     if (!ctx)
@@ -227,19 +227,22 @@ class Proxy extends EventsAsync {
     }
 
     var proto = ctx.isSSL ? https : http;
-
-    var defered = defer();
-    ctx.remote_req = proto.request(ctx.proxyToServerRequestOptions, defered.resolve);
-    ctx.remote_req.on('error', this._onError.bind(this, 'PROXY_TO_SERVER_REQUEST_ERROR', ctx));
-    ctx.requestFilters.push(new FinalRequestFilter(this, ctx));
-    var tmp = req;
-    ctx.requestFilters.forEach(function(filter) {
-      filter.on('error', this._onError.bind(this, 'REQUEST_FILTER_ERROR', ctx));
-      tmp = tmp.pipe(filter);
-    }, this);
-    req.resume();
-
-    var remote_res = await defered;
+    var remote_res;
+    try {
+      remote_res = await new Promise((resolve, reject) => {
+        ctx.remote_req = proto.request(ctx.proxyToServerRequestOptions, resolve);
+        ctx.remote_req.on('error', reject);
+        ctx.requestFilters.push(new FinalRequestFilter(this, ctx));
+        var tmp = req;
+        ctx.requestFilters.forEach(function(filter) {
+          filter.on('error', this._onError.bind(this, 'REQUEST_FILTER_ERROR', ctx));
+          tmp = tmp.pipe(filter);
+        }, this);
+        req.resume();
+      });
+    } catch(err) {
+      return this._onError('PROXY_TO_SERVER_REQUEST_ERROR', ctx, err);
+    }
 
     remote_res.on('error', this._onError.bind(this, 'SERVER_TO_PROXY_RESPONSE_ERROR', ctx));
     remote_res.pause();

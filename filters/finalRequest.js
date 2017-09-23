@@ -13,7 +13,7 @@ class FinalRequestFilter extends Events {
   async write(proxy, ctx, chunk) {
     proxy._onRequestData(ctx, chunk).then(function(chunk) {
      if (chunk)
-        ctx.proxyToServerRequest.write(chunk);
+        ctx.remote_req.write(chunk);
     }).catch(function(err){
       proxy._onError('ON_REQUEST_DATA_ERROR', ctx, err);
     });
@@ -35,7 +35,7 @@ class FinalRequestFilter extends Events {
     } catch(err) {
       return this._onError('ON_REQUEST_END_ERROR', ctx, err);
     }
-    return ctx.proxyToServerRequest.end(chunk || undefined);
+    return ctx.remote_req.end(chunk || undefined);
   }
 }
 

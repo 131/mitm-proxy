@@ -16,7 +16,7 @@ class FinalResponseFilter extends Events {
   write(proxy, ctx, chunk) {
     proxy._onResponseData(ctx, chunk).then(function(chunk) {
       if (chunk)
-        ctx.proxyToClientResponse.write(chunk);
+        ctx.res.write(chunk);
     }).catch(function(err) {
       proxy._onError('ON_RESPONSE_DATA_ERROR', ctx, err);
     });
@@ -39,7 +39,7 @@ class FinalResponseFilter extends Events {
       return proxy._onError('ON_RESPONSE_END_ERROR', ctx, err);
     }
 
-    return ctx.proxyToClientResponse.end(chunk || undefined);
+    return ctx.res.end(chunk || undefined);
   }
 }
 
