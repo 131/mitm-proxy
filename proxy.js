@@ -4,10 +4,8 @@ const net = require('net');
 const http = require('http');
 const https = require('https');
 const util = require('util');
-const path = require('path');
 const url = require('url');
 
-const CA  = require('mitm-ca');
 const EventsAsync = require('eventemitter-async');
 const sprintf = util.format;
 const trace   = require('debug')('mitm');
@@ -17,12 +15,9 @@ const FinalResponseFilter = require('./filters/finalResponse');
 
 class Proxy extends EventsAsync {
 
-  constructor(){
+  constructor(ca){
     super();
-
-    var caPath = path.resolve(process.cwd(), '.http-mitm-proxy');
-    this.ca = new CA(caPath);
-
+    this.ca = ca;
     this.onErrorHandlers = [];
     this.onRequestDataHandlers = [];
     this.onResponseDataHandlers = [];
@@ -35,7 +30,7 @@ class Proxy extends EventsAsync {
   onResponseData (fn) { this.onResponseDataHandlers.push(fn); return this; };
 
 
-  async listen(options) {
+  async listen(options, callback) {
     this.httpPort = options.port || 8080;
     this.httpHost = options.host;
     this.timeout = options.timeout || 0;
@@ -101,15 +96,13 @@ class Proxy extends EventsAsync {
       // URL is in the form 'hostname:port'
       var hostname = req.url.split(':', 2)[0];
 
-      var sslServer = this.sslServers[hostname];
-      if (!sslServer) {
-        try {
-          sslServer = await this._createHTTPSServer(hostname);
-        } catch(err) {
-          return this._onError('OPEN_HTTPS_SERVER_ERROR', null, err);
-        }
+      try {
+        var sslServer = await this._pickHTTPSserver(hostname);
+        port = sslServer.port;
+      } catch(err) {
+        return this._onError('OPEN_HTTPS_SERVER_ERROR', null, err);
       }
-      port = sslServer.port;
+      
     }
 
     // open a TCP connection to the remote host
@@ -123,7 +116,11 @@ class Proxy extends EventsAsync {
     conn.on('error', this._onError.bind(this, 'PROXY_TO_PROXY_SOCKET_ERROR', null));
   }
 
-  async _createHTTPSServer(hostname) {
+  async _pickHTTPSserver(hostname) {
+    var sslServer = this.sslServers[hostname];
+    if(sslServer)
+      return sslServer;
+
     var ctx = this.ca.getBundle(hostname);
 
     trace('starting server for ', hostname);
@@ -132,10 +129,10 @@ class Proxy extends EventsAsync {
     server.timeout = this.timeout;
     server.on('error', this._onError.bind(this, 'HTTPS_SERVER_ERROR', null));
     server.on('clientError', this._onError.bind(this, 'HTTPS_CLIENT_ERROR', null));
-    server.on('connect', this._onHttpServerConnect.bind(this));
+    server.on('connect', this._onHttpServerConnect.bind(this)); //CONNECT
     server.on('request', this._onHttpServerRequest.bind(this, true));
 
-    await new Promise(function(resolve) { httpsServer.listen(resolve); });
+    await new Promise(function(resolve) { server.listen(resolve); });
 
     var port = server.address().port;
     trace('https server started for %s on %s', hostname, port);
@@ -145,26 +142,26 @@ class Proxy extends EventsAsync {
 
 
   _onError(kind, ctx, err) {
-    this.onErrorHandlers.forEach(handler.bind(null, ctx, err, kind));
+    this.onErrorHandlers.forEach( fn => fn(ctx, err, kind));
 
     if (!ctx)
       return;
 
-    ctx.onErrorHandlers.forEach(handler.bind(null, ctx, err, kind));
+    ctx.onErrorHandlers.forEach(fn => fn(ctx, err, kind));
 
-    if (ctx.proxyToClientResponse && !ctx.proxyToClientResponse.headersSent)
-      ctx.proxyToClientResponse.writeHead(504, 'Proxy Error');
+    if (ctx.res && !ctx.res.headersSent)
+      ctx.res.writeHead(504, 'Proxy Error');
 
-    if (ctx.proxyToClientResponse && !ctx.proxyToClientResponse.finished)
-      ctx.proxyToClientResponse.end(sprintf("%s: %s", kind, err), 'utf8');
+    if (ctx.res && !ctx.res.finished)
+      ctx.res.end(sprintf("%s: %s", kind, err), 'utf8');
   }
 
-  async _onHttpServerRequest (isSSL, clientToProxyRequest, proxyToClientResponse) {
+  async _onHttpServerRequest (isSSL, req, res) {
 
-    var ctx = {
+    var ctx = Object.assign(new EventsAsync(), {
       isSSL,
-      clientToProxyRequest,
-      proxyToClientResponse,
+      req,
+      res,
 
       onErrorHandlers: [],
       onRequestDataHandlers: [],
@@ -191,90 +188,88 @@ class Proxy extends EventsAsync {
         ctx.responseFilters.push(filter);
         return ctx;
       }
-    };
+    });
 
-    ctx.clientToProxyRequest.on('error', this._onError.bind(this, 'CLIENT_TO_PROXY_REQUEST_ERROR', ctx));
-    ctx.proxyToClientResponse.on('error', this._onError.bind(this, 'PROXY_TO_CLIENT_RESPONSE_ERROR', ctx));
-    ctx.clientToProxyRequest.pause();
-    var hostPort = Proxy.parseHostAndPort(ctx.clientToProxyRequest, ctx.isSSL ? 443 : 80);
+    req.on('error', this._onError.bind(this, 'CLIENT_TO_PROXY_REQUEST_ERROR', ctx));
+    res.on('error', this._onError.bind(this, 'PROXY_TO_CLIENT_RESPONSE_ERROR', ctx));
+    req.pause();
+
+    var hostPort = Proxy.parseHostAndPort(req, ctx.isSSL ? 443 : 80);
+
     var headers = {};
-    for (var h in ctx.clientToProxyRequest.headers) {
+    for (var h in req.headers) {
       // don't forward proxy- headers
       if (!/^proxy\-/i.test(h)) {
-        headers[h] = ctx.clientToProxyRequest.headers[h];
+        headers[h] = req.headers[h];
       }
     }
     delete headers['content-length'];
 
     ctx.proxyToServerRequestOptions = {
-      method: ctx.clientToProxyRequest.method,
-      path: ctx.clientToProxyRequest.url,
+      method: req.method,
+      path: req.url,
       host: hostPort.host,
       port: hostPort.port,
-      headers: headers,
+      headers,
     };
 
     try {
       await this.emit('onRequest', ctx);
       await ctx.emit('onRequest', ctx);
-
-      try {
-        await this.emit('onRequestHeaders', ctx);
-        makeProxyToServerRequest();
-      } catch(err) {
-        return this._onError('ON_REQUESTHEADERS_ERROR', ctx, err);
-      }
     } catch(err){
       return this._onError('ON_REQUEST_ERROR', ctx, err);
     }
-
-    var makeProxyToServerRequest = () => {
-      var proto = ctx.isSSL ? https : http;
-      ctx.proxyToServerRequest = proto.request(ctx.proxyToServerRequestOptions, proxyToServerRequestComplete);
-      ctx.proxyToServerRequest.on('error', this._onError.bind(this, 'PROXY_TO_SERVER_REQUEST_ERROR', ctx));
-      ctx.requestFilters.push(new FinalRequestFilter(this, ctx));
-      var prevRequestPipeElem = ctx.clientToProxyRequest;
-      ctx.requestFilters.forEach(function(filter) {
-        filter.on('error', this._onError.bind(this, 'REQUEST_FILTER_ERROR', ctx));
-        prevRequestPipeElem = prevRequestPipeElem.pipe(filter);
-      });
-      ctx.clientToProxyRequest.resume();
+    try {
+      await this.emit('onRequestHeaders', ctx);
+    } catch(err) {
+      return this._onError('ON_REQUESTHEADERS_ERROR', ctx, err);
     }
 
-    var proxyToServerRequestComplete = async (serverToProxyResponse) => {
-      serverToProxyResponse.on('error', this._onError.bind(this, 'SERVER_TO_PROXY_RESPONSE_ERROR', ctx));
-      serverToProxyResponse.pause();
-      ctx.serverToProxyResponse = serverToProxyResponse;
+    var proto = ctx.isSSL ? https : http;
 
-      try {
-        await this.emit('onResponse', ctx);
-        await ctx.emit('onResponse', ctx);
+    var defered = defer();
+    ctx.remote_req = proto.request(ctx.proxyToServerRequestOptions, defered.resolve);
+    ctx.remote_req.on('error', this._onError.bind(this, 'PROXY_TO_SERVER_REQUEST_ERROR', ctx));
+    ctx.requestFilters.push(new FinalRequestFilter(this, ctx));
+    var tmp = req;
+    ctx.requestFilters.forEach(function(filter) {
+      filter.on('error', this._onError.bind(this, 'REQUEST_FILTER_ERROR', ctx));
+      tmp = tmp.pipe(filter);
+    }, this);
+    req.resume();
 
-        ctx.serverToProxyResponse.headers['transfer-encoding'] = 'chunked';
-        delete ctx.serverToProxyResponse.headers['content-length'];
-        ctx.serverToProxyResponse.headers['connection'] = 'close';
+    var remote_res = await defered;
 
-        try {
-          await this.emit('onResponseHeaders', ctx);
-          ctx.proxyToClientResponse.writeHead(ctx.serverToProxyResponse.statusCode, Proxy.filterAndCanonizeHeaders(ctx.serverToProxyResponse.headers));
-          ctx.responseFilters.push(new FinalResponseFilter(this, ctx));
+    remote_res.on('error', this._onError.bind(this, 'SERVER_TO_PROXY_RESPONSE_ERROR', ctx));
+    remote_res.pause();
+    ctx.remote_res = remote_res;
 
-          var prevResponsePipeElem = ctx.serverToProxyResponse;
-          ctx.responseFilters.forEach(function(filter) {
-            filter.on('error', this._onError.bind(this, 'RESPONSE_FILTER_ERROR', ctx));
-            prevResponsePipeElem = prevResponsePipeElem.pipe(filter);
-          });
-          return ctx.serverToProxyResponse.resume();
-
-        } catch(err) {
-          return this._onError('ON_RESPONSEHEADERS_ERROR', ctx, err);
-        }
-
-      } catch(err) {
-        return this._onError('ON_RESPONSE_ERROR', ctx, err);
-      }
+    try {
+      await this.emit('onResponse', ctx);
+      await ctx.emit('onResponse', ctx);
+    } catch(err) {
+      return this._onError('ON_RESPONSE_ERROR', ctx, err);
     }
 
+    try {
+      remote_res.headers['transfer-encoding'] = 'chunked';
+      delete remote_res.headers['content-length'];
+      remote_res.headers['connection'] = 'close';
+      await this.emit('onResponseHeaders', ctx);
+    } catch(err) {
+      return this._onError('ON_RESPONSEHEADERS_ERROR', ctx, err);
+    }
+
+    res.writeHead(remote_res.statusCode, Proxy.filterAndCanonizeHeaders(remote_res.headers));
+    ctx.responseFilters.push(new FinalResponseFilter(this, ctx));
+
+    var tmp = remote_res;
+    ctx.responseFilters.forEach(function(filter) {
+      filter.on('error', this._onError.bind(this, 'RESPONSE_FILTER_ERROR', ctx));
+      tmp = tmp.pipe(filter);
+    }, this);
+
+    remote_res.resume();
   }
 
   async _onRequestData(ctx, chunk) {
@@ -301,9 +296,9 @@ class Proxy extends EventsAsync {
 
   static parseHostAndPort(req, defaultPort) {
     var host = req.headers.host;
-    if (!host) {
+    if (!host)
       return null;
-    }
+
     var hostPort = Proxy.parseHost(host, defaultPort);
 
     // this handles paths which include the full url. This could happen if it's a proxy
@@ -354,5 +349,5 @@ class Proxy extends EventsAsync {
 
 
 
-module.exports.Proxy = Proxy;
+module.exports = Proxy;
 
