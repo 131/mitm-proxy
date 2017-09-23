@@ -278,7 +278,7 @@ class Proxy extends EventsAsync {
 
   async _onRequestData(ctx, chunk) {
     try {
-      for(var fn in this.onRequestDataHandlers.concat(ctx.onRequestDataHandlers))
+      for(var fn of this.onRequestDataHandlers.concat(ctx.onRequestDataHandlers))
         chunk = await fn(ctx, chunk);
     } catch(err) {
       return this._onError('ON_REQUEST_DATA_ERROR', ctx, err);
@@ -288,7 +288,7 @@ class Proxy extends EventsAsync {
 
   async _onResponseData(ctx, chunk) {
     try {
-      for(var fn in this.onResponseDataHandlers.concat(ctx.onResponseDataHandlers))
+      for(var fn of this.onResponseDataHandlers.concat(ctx.onResponseDataHandlers))
         chunk = await fn(ctx, chunk);
     } catch(err) {
       return this._onError('ON_RESPONSE_DATA_ERROR', ctx, err);
