@@ -3,8 +3,8 @@
 const CA    = require('mitm-ca');
 const ca    = new CA('.trashmeca');
 
-const Proxy = require('.');
-const gunzip = require('./middleware/gunzip');
+const Proxy = require('mitm-http');
+const gunzip = require('mitm-http/middleware/gunzip');
 
 const proxy = new Proxy(ca);
 
