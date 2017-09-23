@@ -6,6 +6,7 @@ const https = require('https');
 const util = require('util');
 const url = require('url');
 
+const defer = require('nyks/promise/defer');
 const EventsAsync = require('eventemitter-async');
 const sprintf = util.format;
 const trace   = require('debug')('mitm');
