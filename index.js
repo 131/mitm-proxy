@@ -49,7 +49,6 @@ class Proxy extends EventsAsync {
   }
 
 
-
   close() {
     this.httpServer.close();
     delete this.httpServer;
@@ -62,6 +61,7 @@ class Proxy extends EventsAsync {
 
 
   async _onHttpServerConnect(req, socket, head) {
+
     try {
       await this.emit('onConnect', req, socket, head);
     } catch(err) {
@@ -69,15 +69,13 @@ class Proxy extends EventsAsync {
     }
     // we need first byte of data to detect if request is SSL encrypted
     if (!head || head.length === 0) {
-      socket.once('data', this._onHttpServerConnectData.bind(this, req, socket));
-      socket.write('HTTP/1.1 200 OK\r\n');
-      return socket.write('\r\n');
-    } else {
-      this._onHttpServerConnectData(req, socket, head)
+      head = await new Promise(function(resolve){
+        socket.once('data', resolve);
+        socket.write('HTTP/1.1 200 OK\r\n');
+        socket.write('\r\n');
+      });
     }
-  }
 
-  async _onHttpServerConnectData(req, socket, head) {
     socket.pause();
 
     /*
