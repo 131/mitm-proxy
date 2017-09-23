@@ -1,3 +1,23 @@
+# mitm-proxy
+An ES7 (async/await) supported version of [node-http-mitm-proxy](https://github.com/joeferner/node-http-mitm-proxy).
+
+# CA
+Move all ca related stuffs to a dedicated [mitm-ca](https://github.com/131/mitm-ca) module.
+Drop sni/wildcard support (for now). Proxy constructor now need a CA instance.
+
+# WS
+Remove all WS related features (for now)
+
+# Plugins
+Replace .use with async event flow.
+
+# Logs & traces
+Use [debug](https://github.com/tj/debug) for traces. Start proxy with DEBUG=* to view all traces.
+
+
+# APIs
+
+```
 "use strict";
 
 const CA    = require('mitm-ca');
@@ -27,3 +47,4 @@ proxy.on('onRequest', async function(ctx) {
 proxy.listen({port: 8080}, function(){
   console.log("Now listening");
 });
+```
