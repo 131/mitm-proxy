@@ -16,5 +16,13 @@
     "proxy"
   ],
   "author": "Francois Leurent",
-  "license": "ISC"
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/131/mitm-proxy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/131/mitm-proxy/issues"
+  },
+  "homepage": "https://github.com/131/mitm-proxy#readme"
 }
