@@ -20,7 +20,7 @@ Use [debug](https://github.com/tj/debug) for traces. Start proxy with DEBUG=* to
 ```
 "use strict";
 
-const CA    = require('mitm-ca');
+const CA    = require('mitm-ca/fs');
 const ca    = new CA('.trashmeca');
 
 const Proxy = require('mitm-http');

@@ -119,7 +119,7 @@ class Proxy extends EventsAsync {
     if(sslServer)
       return sslServer;
 
-    var ctx = this.ca.getBundle(hostname);
+    var ctx = await this.ca.getBundle(hostname);
 
     trace('starting server for ', hostname);
 

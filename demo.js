@@ -1,6 +1,6 @@
 "use strict";
 
-const CA    = require('mitm-ca');
+const CA    = require('mitm-ca/fs');
 const ca    = new CA('.trashmeca');
 
 const Proxy = require('mitm-http');
