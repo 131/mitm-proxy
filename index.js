@@ -9,6 +9,7 @@ const url = require('url');
 const EventsAsync = require('eventemitter-async');
 const sprintf = util.format;
 const trace   = require('debug')('mitm');
+const randInt = require('mout/random/randInt');
 
 const FinalRequestFilter  = require('./filters/finalRequest');
 const FinalResponseFilter = require('./filters/finalResponse');
@@ -58,6 +59,24 @@ class Proxy extends EventsAsync {
       delete this.sslServers[srvName];
     };
   }
+
+
+  mitm(hostname, remote_addr, ports) {
+    if(!ports) ports = [80, 443];
+    var sslServer = await this._pickHTTPSserver(hostname);
+    var addr = [127, randInt(0, 255), randInt(0, 255), randInt(0, 255)];
+
+    for(var port of ports)
+      sslServer.server.listen(port, addr);
+
+    this.on('onRequestHeaders', function(ctx){
+      if(ctx.proxyToServerRequestOptions.host == hostname)
+        Object.assign(ctx.proxyToServerRequestOptions, { host: remote_addr });
+    });
+
+    return addr;
+  }
+
 
 
   async _onHttpServerConnect(req, socket, head) {
