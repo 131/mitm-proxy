@@ -61,7 +61,7 @@ class Proxy extends EventsAsync {
   }
 
 
-  mitm(hostname, remote_addr, ports) {
+  async mitm(hostname, remote_addr, ports) {
     if(!ports) ports = [80, 443];
     var sslServer = await this._pickHTTPSserver(hostname);
     var addr = [127, randInt(0, 255), randInt(0, 255), randInt(0, 255)];
